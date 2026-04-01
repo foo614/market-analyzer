@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "yahoo-finance2": "^3.13.2",
+    "zeromq": "^6.5.0"
+  }
+}
