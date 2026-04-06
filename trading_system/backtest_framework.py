@@ -4,23 +4,19 @@ import numpy as np
 import matplotlib.pyplot as plt
 from datetime import datetime
 import os
+import sys
 import requests
-import re
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from indicators import calculate_rsi, calculate_obv, calculate_macd, calculate_atr
+from config import get_credential
 
 # Disable yfinance cache entirely to bypass peewee/sqlite issues in sandbox
 yf.set_tz_cache_location("custom_cache_dir")
 
 def get_alpha_vantage_key():
-    key = os.environ.get("ALPHAVANTAGE_API_KEY")
-    if key: return key
-    try:
-        tools_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'TOOLS.md')
-        if os.path.exists(tools_path):
-            with open(tools_path, 'r', encoding='utf-8') as f:
-                match = re.search(r'\*\*Alpha Vantage API Key:\*\*\s*`([^`]+)`', f.read())
-                if match: return match.group(1)
-    except: pass
-    return None
+    return get_credential('alpha_vantage_key', 'ALPHAVANTAGE_API_KEY')
 
 # --- Data Fetchers ---
 class DataFetcher:
@@ -82,39 +78,9 @@ class QuandlFetcher(DataFetcher):
         print(f"Fetching {symbol} from Quandl (Stub)...")
         return pd.DataFrame()
 
-# --- Algorithm Logic ---
-def calculate_obv(df):
-    obv = [0]
-    for i in range(1, len(df)):
-        if df['Close'].iloc[i] > df['Close'].iloc[i-1]:
-            obv.append(obv[-1] + df['Volume'].iloc[i])
-        elif df['Close'].iloc[i] < df['Close'].iloc[i-1]:
-            obv.append(obv[-1] - df['Volume'].iloc[i])
-        else:
-            obv.append(obv[-1])
-    return obv
-
-def calculate_rsi(data, periods=14):
-    delta = data.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=periods).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=periods).mean()
-    rs = gain / loss
-    return 100 - (100 / (1 + rs))
-
-def calculate_macd(df, fast=12, slow=26, signal=9):
-    exp1 = df['Close'].ewm(span=fast, adjust=False).mean()
-    exp2 = df['Close'].ewm(span=slow, adjust=False).mean()
-    macd = exp1 - exp2
-    signal_line = macd.ewm(span=signal, adjust=False).mean()
-    return macd, signal_line
-
-def calculate_atr(df, period=14):
-    high_low = df['High'] - df['Low']
-    high_close = np.abs(df['High'] - df['Close'].shift())
-    low_close = np.abs(df['Low'] - df['Close'].shift())
-    ranges = pd.concat([high_low, high_close, low_close], axis=1)
-    true_range = np.max(ranges, axis=1)
-    return true_range.rolling(period).mean()
+# --- Algorithm Logic (using unified indicators.py) ---
+# calculate_rsi, calculate_obv, calculate_macd, calculate_atr
+# are all imported from indicators.py — the single source of truth.
 
 def generate_signals(df, rsi_buy=30, rsi_sell=70, rsi_period=14, obv_fast=5, obv_slow=10, use_obv=True):
     """
@@ -307,9 +273,9 @@ def run_backtest_suite(symbol="TSLA", years=1, optimize=False):
         for rb in rsi_buy_options:
             for rs in rsi_sell_options:
                 for of in obv_fast_options:
-                    for os in obv_slow_options:
+                    for os_val in obv_slow_options:
                         # Generate signals with current parameters
-                        df = generate_signals(raw_df, rsi_buy=rb, rsi_sell=rs, obv_fast=of, obv_slow=os)
+                        df = generate_signals(raw_df, rsi_buy=rb, rsi_sell=rs, obv_fast=of, obv_slow=os_val)
                         df, trades = backtest(df)
                         metrics = calculate_metrics(df, trades, 10000)
                         

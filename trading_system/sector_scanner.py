@@ -98,18 +98,12 @@ def scan_sectors():
     
     try:
         import sys
-        sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         from agents.message_bus import bus
-        bus.publish('notifications', {'text': report_content})
+        bus.publish('notifications', {'type': 'sector_rotation', 'text': report_content})
         print("Sector Rotation report pushed to message bus.")
     except Exception as e:
         print(f"Failed to publish to bus: {e}")
-        # Fallback
-        try:
-            from telegram_notifier import send_telegram_message
-            send_telegram_message(report_content)
-        except ImportError:
-            pass
 
 if __name__ == "__main__":
     scan_sectors()

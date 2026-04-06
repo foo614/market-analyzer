@@ -6,6 +6,9 @@ TOOLS.local.md
 **/__pycache__/
 **/*.py[cod]
 
+*.log
+trading_system/logs/
+
 node_modules/
 **/node_modules/
 

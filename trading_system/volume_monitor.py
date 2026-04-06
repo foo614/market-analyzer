@@ -146,15 +146,19 @@ def check_intraday_volume():
     with open(STATE_FILE, 'w') as f:
         json.dump(state, f)
         
-    # Send alerts
+    # Send alerts via message bus (NotificationAgent handles Telegram delivery)
     if alerts:
         try:
-            from telegram_notifier import send_telegram_message
+            import sys
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            from agents.message_bus import bus
             for msg in alerts:
-                send_telegram_message(msg)
-                print("Sent volume alert to Telegram.")
-        except ImportError:
-            for msg in alerts: print(msg)
+                bus.publish('notifications', {'type': 'volume_alert', 'text': msg})
+                print("Published volume alert to message bus.")
+        except Exception as e:
+            print(f"Failed to publish volume alert: {e}")
+            for msg in alerts:
+                print(msg)
 
 if __name__ == "__main__":
     check_intraday_volume()
