@@ -104,6 +104,14 @@ class DataAgent:
         except Exception as e:
             log.error(f"Volume scan error: {e}")
 
+    def run_flash_crash_scan(self):
+        log.info("Scanning for Market Flash Crashes...")
+        try:
+            from flash_crash_monitor import check_flash_crass
+            check_flash_crass()
+        except Exception as e:
+            log.error(f"Flash crash scan error: {e}")
+
     def run_sector_scan(self):
         now = datetime.now()
         today_str = now.strftime('%Y-%m-%d')
@@ -115,6 +123,22 @@ class DataAgent:
                 self.last_sector_scan = today_str
             except Exception as e:
                 log.error(f"Sector scan error: {e}")
+
+    def run_daily_backtest(self):
+        now = datetime.now()
+        today_str = now.strftime('%Y-%m-%d')
+        # Use a new state variable or just piggyback on last_sector_scan safely
+        if not hasattr(self, 'last_backtest_scan'):
+            self.last_backtest_scan = ""
+            
+        if self.last_backtest_scan != today_str:
+            log.info("Running Daily Backtest Optimization...")
+            try:
+                from backtest_framework import run_daily_optimization
+                run_daily_optimization()
+                self.last_backtest_scan = today_str
+            except Exception as e:
+                log.error(f"Daily backtest error: {e}")
 
     def start(self):
         self.running = True
@@ -133,7 +157,9 @@ class DataAgent:
 
             self.run_technical_scan()
             self.run_volume_scan()
+            self.run_flash_crash_scan()
             self.run_sector_scan()
+            self.run_daily_backtest()
             time.sleep(DATA_POLL_INTERVAL)
 
 

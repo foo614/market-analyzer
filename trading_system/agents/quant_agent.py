@@ -16,6 +16,7 @@ from config import (
     get_portfolio_tickers, SIGNAL_COOLDOWN_MINUTES,
     OLLAMA_API_URL, OLLAMA_MODEL, check_ollama_health
 )
+from llm_router import llm_router
 
 log = get_logger("QuantAgent")
 
@@ -39,21 +40,8 @@ class QuantAgent:
         # Signal cooldown: {symbol: last_signal_timestamp}
         self.cooldowns = {}
 
-        # LLM client (soft advisory)
-        self.llm_client = None
-        ollama_ok, msg = check_ollama_health()
-        if ollama_ok:
-            try:
-                from openai import OpenAI
-                self.llm_client = OpenAI(
-                    base_url=OLLAMA_API_URL,
-                    api_key="ollama"
-                )
-                log.info(f"LLM-as-Judge enabled ({OLLAMA_MODEL})")
-            except Exception as e:
-                log.warning(f"LLM-as-Judge disabled: {e}")
-        else:
-            log.warning(f"LLM-as-Judge disabled: {msg}")
+        # Record start time
+        self.start_time = time.time()
 
         # Best params from grid search
         self.strategy_params = {
@@ -95,12 +83,9 @@ class QuantAgent:
 
     def _ask_llm_opinion(self, symbol, indicators, action):
         """
-        Ask Ollama for a second opinion on the trade signal.
+        Ask LLM for a second opinion on the trade signal via LLMRouter.
         Returns (opinion, reasoning) — purely advisory, does NOT block.
         """
-        if not self.llm_client:
-            return None, None
-
         prompt = f"""You are a quantitative trading risk advisor. A trading algorithm has generated a {action} signal for {symbol}.
 
 Current indicators:
@@ -115,18 +100,13 @@ Do you AGREE or DISAGREE with the {action} signal? Respond as JSON:
 {{"opinion": "AGREE|DISAGREE", "reason": "One sentence explanation."}}"""
 
         try:
-            response = self.llm_client.chat.completions.create(
-                model=OLLAMA_MODEL,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.2,
-                max_tokens=100
-            )
-            import re
-            raw = response.choices[0].message.content.strip()
-            match = re.search(r'\{.*\}', raw, re.DOTALL)
-            if match:
-                result = json.loads(match.group(0))
-                return result.get('opinion', 'UNKNOWN'), result.get('reason', '')
+            raw_text, source = llm_router.route_request(prompt, expect_json=True, agent_name="QuantAgent")
+            if raw_text:
+                import re
+                match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+                if match:
+                    result = json.loads(match.group(0))
+                    return result.get('opinion', 'UNKNOWN'), result.get('reason', '')
         except Exception as e:
             log.debug(f"LLM opinion failed: {e}")
 
@@ -151,8 +131,8 @@ Do you AGREE or DISAGREE with the {action} signal? Respond as JSON:
             actionSignal = "TAKE PROFIT (Extreme Overbought)"
             trade_action = 'SELL'
         elif isBullish is False and "Distributing" in obvStatus:
-            actionSignal = f"STOP LOSS (Trend Break. ATR Risk: ${(atr * 2):.2f})"
-            trade_action = 'SELL'
+            actionSignal = f"⚠️ WARNING (Trend Break. ATR Risk: ${(atr * 2):.2f})"
+            trade_action = None
         elif rsi < 30 and "Accumulating" in obvStatus:
             sentiment = self.state_data.get('sentiments', {}).get(symbol, 'Neutral')
             if sentiment == 'Bearish':

@@ -14,6 +14,7 @@ from config import (
     OLLAMA_API_URL, OLLAMA_MODEL, check_ollama_health,
     SENTIMENT_POLL_INTERVAL, sleep_until_market
 )
+from llm_router import llm_router
 import yfinance as yf
 
 log = get_logger("SentimentAgent")
@@ -22,29 +23,12 @@ log = get_logger("SentimentAgent")
 class SentimentAgent:
     """
     Scrapes recent news via yfinance for the tracked tickers.
-    Sends headlines to local Ollama (gemma4:e4b) to score Sentiment.
+    Sends headlines to LLMRouter (Gemini 2.5 Flash primary, Ollama fallback).
     Publishes output to 'market_data' queue.
-    Now market-hours-aware with Ollama health checks and retry logic.
+    Now market-hours-aware with proper rate limiting.
     """
     def __init__(self):
         self.running = False
-
-        # Initialize Ollama client with health check
-        self.client = None
-        ollama_ok, msg = check_ollama_health()
-        if ollama_ok:
-            try:
-                from openai import OpenAI
-                self.client = OpenAI(
-                    base_url=OLLAMA_API_URL,
-                    api_key="ollama"
-                )
-                log.info(f"Ollama connected ({OLLAMA_MODEL})")
-            except Exception as e:
-                log.warning(f"Ollama client init failed: {e}")
-        else:
-            log.warning(f"Ollama unavailable: {msg}")
-
         log.info("SentimentAgent Initialized")
 
     def _get_tickers(self):
@@ -114,9 +98,6 @@ class SentimentAgent:
         return {"sentiment": sentiment, "reason": reason.strip()}
 
     def analyze_sentiment(self, symbol, headlines):
-        if not self.client:
-            return "Neutral", "No LLM available"
-
         cleaned = [h.strip() for h in headlines if isinstance(h, str) and h.strip()]
         if not cleaned:
             return "Neutral", "No headlines"
@@ -131,68 +112,16 @@ class SentimentAgent:
             f"Headlines:\n{headlines_text}\n"
         )
 
-        # Retry logic: 1 retry with 5s backoff
-        for attempt in range(2):
-            try:
-                try:
-                    response = self.client.chat.completions.create(
-                        model=OLLAMA_MODEL,
-                        messages=[{"role": "user", "content": base_prompt}],
-                        temperature=0.2,
-                        max_tokens=150,
-                        response_format={"type": "json_object"}
-                    )
-                except TypeError:
-                    response = self.client.chat.completions.create(
-                        model=OLLAMA_MODEL,
-                        messages=[{"role": "user", "content": base_prompt}],
-                        temperature=0.2,
-                        max_tokens=150
-                    )
-
-                raw_text = response.choices[0].message.content.strip()
-
-                parsed = self._parse_llm_json(raw_text)
-                if parsed:
-                    return parsed["sentiment"], parsed["reason"]
-
-                repair_prompt = (
-                    "Convert the following into a valid JSON object ONLY.\n"
-                    "Schema: {\"sentiment\":\"Bullish|Bearish|Neutral\",\"reason\":\"<one sentence>\"}\n\n"
-                    f"TEXT:\n{raw_text}\n"
-                )
-                try:
-                    repair = self.client.chat.completions.create(
-                        model=OLLAMA_MODEL,
-                        messages=[{"role": "user", "content": repair_prompt}],
-                        temperature=0.0,
-                        max_tokens=150,
-                        response_format={"type": "json_object"}
-                    )
-                except TypeError:
-                    repair = self.client.chat.completions.create(
-                        model=OLLAMA_MODEL,
-                        messages=[{"role": "user", "content": repair_prompt}],
-                        temperature=0.0,
-                        max_tokens=150
-                    )
-
-                repaired_text = repair.choices[0].message.content.strip()
-                repaired = self._parse_llm_json(repaired_text)
-                if repaired:
-                    return repaired["sentiment"], repaired["reason"]
-
-                return "Neutral", "Could not parse JSON response"
-
-            except Exception as e:
-                if attempt == 0:
-                    log.warning(f"Ollama error for {symbol}, retrying in 5s: {e}")
-                    time.sleep(5)
-                else:
-                    log.error(f"Ollama failed after retry for {symbol}: {e}")
-                    return "Neutral", "API Error"
-
-        return "Neutral", "API Error"
+        raw_text, source = llm_router.route_request(base_prompt, expect_json=True, agent_name="SentimentAgent")
+        
+        if not raw_text:
+            return "Neutral", f"API Error: {source}"
+            
+        parsed = self._parse_llm_json(raw_text)
+        if parsed:
+            return parsed["sentiment"], parsed["reason"]
+            
+        return "Neutral", "Could not parse JSON response from " + source
 
     def run_news_scan(self):
         tickers = self._get_tickers()
@@ -217,11 +146,64 @@ class SentimentAgent:
                     'sentiment': sentiment,
                     'reason': reason
                 })
+                
+                # Push actionable changes directly to Telegram
+                if sentiment in ["Bullish", "Bearish"]:
+                    try:
+                        from telegram_notifier import send_telegram_message
+                        icon = "🟢" if sentiment == "Bullish" else "🔴"
+                        msg = f"{icon} **Sentiment Shift for {symbol}**\n**Trend:** {sentiment}\n**AI Reason:** {reason}\n\n**Hot News Context:**\n"
+                        for h in headlines[:3]:  # Push the top 3 headlines to Telegram
+                            if h:
+                                msg += f"- {h}\n"
+                        send_telegram_message(msg)
+                    except ImportError:
+                        pass
 
                 time.sleep(2)
 
             except Exception as e:
                 log.error(f"Error for {symbol}: {e}")
+
+        # Scan for global breaking news (Macro)
+        try:
+            log.info("Scanning for global breaking news...")
+            spy = yf.Ticker('SPY')
+            spy_news = spy.news
+            if spy_news:
+                global_headlines = [n.get('content', n).get('title', '') for n in spy_news[:5]]
+                self._check_global_news(global_headlines)
+        except Exception as e:
+            log.error(f"Global news scan error: {e}")
+
+    def _check_global_news(self, headlines):
+        cleaned = [h.strip() for h in headlines if isinstance(h, str) and h.strip()]
+        if not cleaned: return
+
+        headlines_text = "\n".join([f"- {h}" for h in cleaned])
+        prompt = (
+            f"You are a macroeconomic risk analyst.\n"
+            f"Review these general market headlines.\n"
+            f"Identify if there is any EARTH-SHATTERING breaking news (e.g. War, CPI surprise, Fed Rate Cut, Crash).\n"
+            f"If there is breaking news, set 'breaking' to true, and summarize the event in 'summary'. If not, set 'breaking' to false.\n"
+            f"Return ONLY a valid JSON object.\n"
+            f"Schema: {{\"breaking\":true|false,\"summary\":\"<one sentence max>\"}}\n\n"
+            f"Headlines:\n{headlines_text}\n"
+        )
+        
+        raw_text, source = llm_router.route_request(prompt, expect_json=True, agent_name="GlobalNews")
+        if not raw_text: return
+        
+        parsed = self._parse_llm_json(raw_text)
+        if parsed and parsed.get("breaking"):
+            try:
+                from telegram_notifier import send_telegram_message
+                msg = f"🚨 **GLOBAL BREAKING NEWS** 🚨\n{parsed.get('summary', '')}\n\n**Sources:**\n"
+                for h in cleaned[:3]:
+                    msg += f"- {h}\n"
+                send_telegram_message(msg)
+            except ImportError:
+                pass
 
     def start(self):
         self.running = True

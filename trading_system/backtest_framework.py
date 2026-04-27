@@ -98,7 +98,7 @@ def generate_signals(df, rsi_buy=30, rsi_sell=70, rsi_period=14, obv_fast=5, obv
     df['SMA_200'] = df['Close'].rolling(window=200).mean()
     df['RSI'] = calculate_rsi(df['Close'], rsi_period)
     df['OBV'] = calculate_obv(df)
-    df['MACD'], df['MACD_Signal'] = calculate_macd(df)
+    df['MACD'], df['MACD_Signal'] = calculate_macd(df['Close'])
     df['ATR'] = calculate_atr(df)
     
     df[f'OBV_SMA_{obv_fast}'] = df['OBV'].rolling(window=obv_fast).mean()
@@ -262,10 +262,11 @@ def run_backtest_suite(symbol="TSLA", years=1, optimize=False):
         best_params = None
         best_metrics = None
         
-        rsi_buy_options = [25, 30, 35]
-        rsi_sell_options = [65, 70, 75]
-        obv_fast_options = [3, 5, 7]
-        obv_slow_options = [10, 15, 20]
+        # Relaxed RSI bounds, because requiring RSI < 30 *AND* MACD Bullish *AND* OBV accumulation is mathematically impossible in strong bull trends 
+        rsi_buy_options = [35, 45, 55] 
+        rsi_sell_options = [65, 75, 80]
+        obv_fast_options = [3, 5]
+        obv_slow_options = [10, 15]
         
         total_combinations = len(rsi_buy_options) * len(rsi_sell_options) * len(obv_fast_options) * len(obv_slow_options)
         print(f"Testing {total_combinations} combinations...")
@@ -285,7 +286,7 @@ def run_backtest_suite(symbol="TSLA", years=1, optimize=False):
                         
                         if ret_val > best_return:
                             best_return = ret_val
-                            best_params = {'rsi_buy': rb, 'rsi_sell': rs, 'obv_fast': of, 'obv_slow': os}
+                            best_params = {'rsi_buy': rb, 'rsi_sell': rs, 'obv_fast': of, 'obv_slow': os_val}
                             best_metrics = metrics
                             
         report_text += f"🚀 **{symbol} {years}年回测参数寻优报告**\n\n"
@@ -357,8 +358,13 @@ def run_backtest_suite(symbol="TSLA", years=1, optimize=False):
     return report_text
 
 def run_daily_optimization():
-    tickers = ['TSLA', 'TQQQ', 'SOXL']
-    full_report = "🤖 **ClawdBot 每日策略自适应升级**\n\n"
+    from config import get_portfolio_tickers
+    tickers = get_portfolio_tickers()
+    if not tickers:
+        print("No tickers found for daily optimization.")
+        return
+        
+    full_report = "🤖 **ClawdBot 每日策略自适应升级 (Daily Parameter Backtest)**\n\n"
     
     for ticker in tickers:
         print(f"Running optimization for {ticker}...")
