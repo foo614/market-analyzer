@@ -7,7 +7,7 @@ Multi-agent trading system with:
 - Telegram notifications
 
 ## Setup
-1. Create `TOOLS.md` from [TOOLS.example.md](file:///c:/Users/User/clawd-local/TOOLS.example.md).
+1. Create `TOOLS.md` from [TOOLS.example.md](./TOOLS.example.md).
 2. Install Python dependencies:
    - `pip install -r trading_system/requirements.txt`
    - `pip install pyzmq`

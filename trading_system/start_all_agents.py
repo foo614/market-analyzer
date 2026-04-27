@@ -16,6 +16,9 @@ from config import WATCHDOG_INTERVAL, check_ollama_health
 
 log = get_logger("Orchestrator")
 
+SYSTEM_DIR = os.path.dirname(os.path.abspath(__file__))
+AGENTS_DIR = os.path.join(SYSTEM_DIR, "agents")
+
 AGENTS = [
     {"name": "Notification Agent", "file": "notification_agent.py"},
     {"name": "Execution Agent",    "file": "execution_agent.py"},
@@ -23,6 +26,7 @@ AGENTS = [
     {"name": "Data Agent",         "file": "data_agent.py"},
     {"name": "Sentiment Agent",    "file": "sentiment_agent.py"},
     {"name": "Tracker Agent",      "file": "etoro_tracker.py"},
+    {"name": "Market Analyzer",    "file": "../market_analyzer.py", "args": ["--daemon"]},
 ]
 
 MAX_RESTARTS = 3
@@ -30,19 +34,23 @@ RESTART_BACKOFF_BASE = 5  # seconds
 
 
 class AgentProcess:
-    def __init__(self, name, file_path):
+    def __init__(self, name, file_path, args=None, cwd=None):
         self.name = name
         self.file_path = file_path
+        self.args = args or []
+        self.cwd = cwd
         self.process = None
         self.restart_count = 0
         self.last_restart = 0
 
     def start(self):
         log.info(f"Starting {self.name}...")
+        cmd = [sys.executable, self.file_path] + self.args
         self.process = subprocess.Popen(
-            [sys.executable, self.file_path],
+            cmd,
             stdout=sys.stdout,
-            stderr=sys.stderr
+            stderr=sys.stderr,
+            cwd=self.cwd
         )
         self.last_restart = time.time()
         return self.process
@@ -122,8 +130,8 @@ def main():
 
         # Start ZMQ broker first
         log.info("Starting ZeroMQ Message Broker...")
-        bus_path = os.path.join(os.path.dirname(__file__), 'bus_server.py')
-        bus_agent = AgentProcess("ZMQ Broker", bus_path)
+        bus_path = os.path.join(SYSTEM_DIR, 'bus_server.py')
+        bus_agent = AgentProcess("ZMQ Broker", os.path.abspath(bus_path), cwd=SYSTEM_DIR)
         bus_agent.start()
         agents.append(bus_agent)
         time.sleep(2)  # Give socket time to bind
@@ -135,12 +143,12 @@ def main():
             return
 
         # Start all agents with staggered delays
-        agents_dir = os.path.join(os.path.dirname(__file__), 'agents')
         for agent_def in AGENTS:
-            agent_path = os.path.join(agents_dir, agent_def["file"])
-            agent = AgentProcess(agent_def["name"], agent_path)
-            agent.start()
-            agents.append(agent)
+            agent_path = os.path.abspath(os.path.join(AGENTS_DIR, agent_def["file"]))
+            
+            p = AgentProcess(agent_def["name"], agent_path, args=agent_def.get("args"), cwd=SYSTEM_DIR)
+            p.start()
+            agents.append(p)
             time.sleep(1)
 
         log.info("")

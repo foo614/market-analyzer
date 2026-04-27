@@ -11,6 +11,8 @@ Copy this file to `TOOLS.md` (kept local and ignored by git) and fill in your cr
 ## AI Models
 - **OpenAI API Key:** `<your_openai_key_optional>`
 - **NVIDIA API Key:** `<your_nvidia_api_key>`
+- **Gemini API Key:** `<your_gemini_api_key_primary>`
+- **Gemini API Key (Fallback):** `<your_gemini_api_key_fallback>`
 
 ## eToro Environment
 - **Public Key:** `<your_etoro_public_key>`

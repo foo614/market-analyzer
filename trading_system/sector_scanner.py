@@ -3,9 +3,13 @@ import pandas as pd
 from datetime import datetime
 import pytz
 import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from config import SYSTEM_DIR
 
 # Disable cache to avoid peewee lock issues
-yf.set_tz_cache_location("custom_cache_dir")
+yf.set_tz_cache_location(os.path.join(SYSTEM_DIR, "custom_cache_dir"))
 
 # S&P 500 Sector ETFs
 SECTORS = {
@@ -91,14 +95,13 @@ def scan_sectors():
         
     report_content = "\n".join(report_lines)
     
-    with open("sector_rotation.md", "w", encoding="utf-8") as f:
+    report_path = os.path.join(SYSTEM_DIR, "sector_rotation.md")
+    with open(report_path, "w", encoding="utf-8") as f:
         f.write(report_content)
         
     print("Sector scan complete. Report saved.")
     
     try:
-        import sys
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         from agents.message_bus import bus
         bus.publish('notifications', {'type': 'sector_rotation', 'text': report_content})
         print("Sector Rotation report pushed to message bus.")

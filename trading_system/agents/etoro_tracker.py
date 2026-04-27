@@ -24,7 +24,7 @@ except ImportError:
 from logger import get_logger
 from config import (
     get_etoro_headers, etoro_request, ETORO_BASE_URL,
-    TRACKER_POLL_INTERVAL
+    TRACKER_POLL_INTERVAL, SYSTEM_DIR
 )
 
 log = get_logger("TrackerAgent")
@@ -136,7 +136,8 @@ def generate_performance_report(conn, is_real=False):
     ]
 
     report_content = "\n".join(report_lines)
-    with open("etoro_performance.md", "w", encoding="utf-8") as f:
+    report_path = os.path.join(SYSTEM_DIR, "etoro_performance.md")
+    with open(report_path, "w", encoding="utf-8") as f:
         f.write(report_content)
 
     log.info(f"Performance report generated ({mode})")
@@ -162,7 +163,7 @@ class TrackerAgent:
         while self.running:
             try:
                 # 1. Sync DEMO Performance
-                conn_demo = init_db("etoro_trades_demo.db")
+                conn_demo = init_db(os.path.join(SYSTEM_DIR, "etoro_trades_demo.db"))
                 hist_demo = fetch_trade_history(is_real=False)
                 if hist_demo:
                     process_and_save_trades(hist_demo, conn_demo)
@@ -170,7 +171,7 @@ class TrackerAgent:
                 conn_demo.close()
 
                 # 2. Sync REAL Performance
-                conn_real = init_db("etoro_trades_real.db")
+                conn_real = init_db(os.path.join(SYSTEM_DIR, "etoro_trades_real.db"))
                 hist_real = fetch_trade_history(is_real=True)
                 if hist_real:
                     process_and_save_trades(hist_real, conn_real)

@@ -12,14 +12,14 @@ import sys
 import re
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from config import OLLAMA_API_URL, OLLAMA_MODEL, check_ollama_health
+from config import OLLAMA_API_URL, OLLAMA_MODEL, check_ollama_health, SYSTEM_DIR
 from indicators import calculate_rsi
 from logger import get_logger
 
 log = get_logger("MarketAnalyzer")
 
 # Disable yfinance cache
-yf.set_tz_cache_location("custom_cache_dir")
+yf.set_tz_cache_location(os.path.join(SYSTEM_DIR, "custom_cache_dir"))
 
 
 def get_support_resistance(high, low, close):
@@ -116,10 +116,11 @@ def analyze_market():
         report_content = f"{llm_brief}\n\n---\n\n{report_content}"
 
     # Save to file
-    with open("market_report.md", "w", encoding="utf-8") as f:
+    report_path = os.path.join(SYSTEM_DIR, "market_report.md")
+    with open(report_path, "w", encoding="utf-8") as f:
         f.write(report_content)
 
-    log.info("Market report generated: market_report.md")
+    log.info(f"Market report generated: {report_path}")
 
     # Notify via Telegram
     try:
@@ -132,43 +133,50 @@ def analyze_market():
 
 
 def generate_llm_brief(raw_data):
-    log.info("Asking Ollama to analyze market sentiment...")
+    from llm_router import llm_router
+    log.info("Asking LLM to analyze market sentiment...")
+
+    prompt = f"""
+    You are a senior quantitative analyst. Review the following raw market data and provide a concise, 
+    actionable 3-4 sentence daily brief for a trader in **Chinese (中文)**. 
+    Focus on the VIX sentiment, futures premium, and ETF volume rotation.
+    Do not output markdown headers, just the plain text insight with appropriate emojis.
+    
+    Data:
+    {raw_data}
+    """
+    
     try:
-        from openai import OpenAI
-
-        ollama_ok, msg = check_ollama_health()
-        if not ollama_ok:
-            log.warning(f"Ollama unavailable: {msg}. Skipping LLM.")
-            return None
-
-        client = OpenAI(
-            base_url=OLLAMA_API_URL,
-            api_key="ollama"
-        )
-
-        prompt = f"""
-        You are a senior quantitative analyst. Review the following raw market data and provide a concise, 
-        actionable 3-4 sentence daily brief for a trader in **Chinese (中文)**. 
-        Focus on the VIX sentiment, futures premium, and ETF volume rotation.
-        Do not output markdown headers, just the plain text insight with appropriate emojis.
-        
-        Data:
-        {raw_data}
-        """
-
-        response = client.chat.completions.create(
-            model=OLLAMA_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7,
-            max_tokens=200
-        )
-
-        return f"🤖 **Ollama Gemma Insight:**\n{response.choices[0].message.content.strip()}"
-
+        raw_text, source = llm_router.route_request(prompt, expect_json=False, agent_name="MarketAnalyzer")
+        if raw_text:
+            return f"🤖 **AI Insight ({source}):**\n{raw_text.strip()}"
     except Exception as e:
         log.error(f"LLM analysis failed: {e}")
-        return None
+        
+    return None
+
+
+def run_daemon():
+    import time
+    from config import is_trading_day, sleep_until_market
+    
+    log.info("Market Analyzer Daemon started.")
+    while True:
+        if not is_trading_day():
+            log.info("Weekend. Sleeping until Monday.")
+            sleep_until_market(log)
+            continue
+            
+        analyze_market()
+        
+        # Sleep for 4 hours before sending another report
+        time.sleep(14400)
 
 
 if __name__ == "__main__":
-    analyze_market()
+    if len(sys.argv) > 1 and sys.argv[1] == "--daemon":
+        run_daemon()
+    else:
+        analyze_market()
+        # If run manually but not as daemon, you might still want it to run just once.
+        # But we'll use --daemon inside start_all_agents.py

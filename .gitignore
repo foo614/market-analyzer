@@ -8,6 +8,7 @@ TOOLS.local.md
 
 *.log
 trading_system/logs/
+**/llm_tracker.json
 
 node_modules/
 **/node_modules/

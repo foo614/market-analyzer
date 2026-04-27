@@ -6,10 +6,13 @@ import pytz
 import json
 import os
 
-yf.set_tz_cache_location("custom_cache_dir")
+import sys
 
-TICKERS = ['TSLA', 'SOXL', 'TQQQ', 'UNH']
-STATE_FILE = "volume_alert_state.json"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from config import get_portfolio_tickers, SYSTEM_DIR
+
+yf.set_tz_cache_location(os.path.join(SYSTEM_DIR, "custom_cache_dir"))
+STATE_FILE = os.path.join(SYSTEM_DIR, "volume_alert_state.json")
 
 def get_historical_thresholds(symbol):
     """Calculate 20-day average volume and 60-day 99th percentile volume."""
@@ -49,7 +52,12 @@ def check_intraday_volume():
         
     alerts = []
     
-    for symbol in TICKERS:
+    tickers = get_portfolio_tickers()
+    if not tickers:
+        print("No tickers found in eToro portfolio.")
+        return
+
+    for symbol in tickers:
         has_surge_alert = f"{symbol}_surge" in state["alerts"] or symbol in state["alerts"]
         has_shrink_alert = f"{symbol}_shrink" in state["alerts"]
         

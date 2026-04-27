@@ -40,7 +40,12 @@ SIGNAL_COOLDOWN_MINUTES = 60  # Suppress duplicate signals for same symbol
 # ─── Fallback Tickers (used if eToro API is unreachable) ─────────────────────
 FALLBACK_TICKERS = ['TSLA', 'SOXL', 'TQQQ']
 
-# ─── Ollama ──────────────────────────────────────────────────────────────────
+# ─── LLM Configuration ────────────────────────────────────────────────────────
+GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_RPM_LIMIT = 5
+GEMINI_RPD_LIMIT = 20
+
+# ─── Ollama (Fallback) ───────────────────────────────────────────────────────
 OLLAMA_BASE_URL = "http://localhost:11434"
 OLLAMA_MODEL = "gemma4:e4b"
 OLLAMA_API_URL = f"{OLLAMA_BASE_URL}/v1"
@@ -73,6 +78,8 @@ def _parse_tools_md():
             'alpha_vantage_key': r'\*\*Alpha Vantage API Key:\*\*\s*`([^`]+)`',
             'openai_key': r'\*\*OpenAI API Key:\*\*\s*`([^`]+)`',
             'nvidia_key': r'\*\*NVIDIA API Key:\*\*\s*`([^`]+)`',
+            'gemini_key': r'\*\*Gemini API Key:\*\*\s*`([^`]+)`',
+            'gemini_key_fallback': r'\*\*Gemini API Key \(Fallback\):\*\*\s*`([^`]+)`',
             'etoro_pub_key': r'\*\*Public Key:\*\*\s*`([^`]+)`',
             'etoro_demo_key': r'\*\*Demo User Key:\*\*\s*`([^`]+)`',
             'etoro_real_key': r'\*\*Real User Key:\*\*\s*`([^`]+)`',
@@ -98,6 +105,17 @@ def get_credential(key, env_var=None):
             return val
     creds = _parse_tools_md()
     return creds.get(key)
+
+
+def get_gemini_api_keys():
+    primary = os.environ.get("GEMINI_API_KEY") or get_credential("gemini_key")
+    fallback = os.environ.get("GEMINI_API_KEY_FALLBACK") or get_credential("gemini_key_fallback")
+    keys = []
+    if primary:
+        keys.append(primary.strip())
+    if fallback and fallback.strip() and (not keys or fallback.strip() != keys[0]):
+        keys.append(fallback.strip())
+    return keys
 
 
 # ─── eToro Headers ───────────────────────────────────────────────────────────
