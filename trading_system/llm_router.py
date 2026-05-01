@@ -7,7 +7,7 @@ import sys
 import time
 import json
 import hashlib
-from datetime import datetime, timedelta
+from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import (
@@ -35,8 +35,7 @@ TRACKER_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "llm_tra
 
 class LLMRouter:
     def __init__(self):
-        self.gemini_keys = get_gemini_api_keys()
-        if genai and self.gemini_keys:
+        if genai and get_gemini_api_keys():
             log.info(f"Gemini enabled ({GEMINI_MODEL})")
         elif genai:
             log.warning("Gemini keys not configured. Falling back to Ollama.")
@@ -122,11 +121,12 @@ class LLMRouter:
         self._save_state()
 
     def _select_key(self, exclude_fps=None):
-        if not genai or not self.gemini_keys:
+        gemini_keys = get_gemini_api_keys()
+        if not genai or not gemini_keys:
             return None, None, "Not initialized"
 
         exclude_fps = set(exclude_fps or [])
-        for key in self.gemini_keys:
+        for key in gemini_keys:
             fp = self._fp(key)
             if fp in exclude_fps:
                 continue
@@ -153,9 +153,9 @@ class LLMRouter:
 
             used_fps.append(fp)
             try:
-                self._record_gemini_request(fp)
                 ks = self._get_key_state(fp)
-                log.info(f"{agent_name} -> Gemini ({len(ks['requests_this_minute'])}/{GEMINI_RPM_LIMIT} RPM)")
+                current_rpm = len(ks["requests_this_minute"])
+                log.info(f"{agent_name} -> Gemini ({current_rpm + 1}/{GEMINI_RPM_LIMIT} RPM)")
 
                 client = genai.Client(api_key=key)
                 config = types.GenerateContentConfig(temperature=0.2)
@@ -169,6 +169,7 @@ class LLMRouter:
                 )
                 raw_text = response.text
                 source = "Gemini"
+                self._record_gemini_request(fp)
                 break
             except Exception as e:
                 err_str = str(e).lower()

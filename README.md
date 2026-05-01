@@ -12,7 +12,7 @@ Multi-agent trading system with:
    - `pip install -r trading_system/requirements.txt`
    - `pip install pyzmq`
 3. Run the system:
-   - `python trading_system/start_all_agents.py`
+   - `python -m trading_system.start_all_agents`
 
 ## Notes
 - Demo trading is automated; real trading is emitted as manual recommendations.

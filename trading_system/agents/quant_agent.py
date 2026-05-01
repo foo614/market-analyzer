@@ -13,7 +13,7 @@ from agents.message_bus import bus
 from backtest_framework import YahooFetcher, generate_signals
 from logger import get_logger
 from config import (
-    get_portfolio_tickers, SIGNAL_COOLDOWN_MINUTES,
+    get_portfolio_tickers, SIGNAL_COOLDOWN_MINUTES, system_path,
     OLLAMA_API_URL, OLLAMA_MODEL, check_ollama_health
 )
 from llm_router import llm_router
@@ -34,7 +34,7 @@ class QuantAgent:
         self.running = False
 
         # State tracking
-        self.state_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'quant_alert_state.json')
+        self.state_file = system_path('quant_alert_state.json')
         self.state_data = self._load_state()
 
         # Signal cooldown: {symbol: last_signal_timestamp}

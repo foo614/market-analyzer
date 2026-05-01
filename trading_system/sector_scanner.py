@@ -6,10 +6,10 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from config import SYSTEM_DIR
+from config import YFINANCE_CACHE_DIR, system_path
 
 # Disable cache to avoid peewee lock issues
-yf.set_tz_cache_location(os.path.join(SYSTEM_DIR, "custom_cache_dir"))
+yf.set_tz_cache_location(YFINANCE_CACHE_DIR)
 
 # S&P 500 Sector ETFs
 SECTORS = {
@@ -95,7 +95,7 @@ def scan_sectors():
         
     report_content = "\n".join(report_lines)
     
-    report_path = os.path.join(SYSTEM_DIR, "sector_rotation.md")
+    report_path = system_path("sector_rotation.md")
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(report_content)
         

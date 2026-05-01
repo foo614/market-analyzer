@@ -1,0 +1,3 @@
+"""
+ClawdBot agent package.
+"""

@@ -11,8 +11,7 @@ from agents.message_bus import bus
 from logger import get_logger
 from config import (
     get_portfolio_tickers, is_trading_day, is_premarket, is_market_open,
-    OLLAMA_API_URL, OLLAMA_MODEL, check_ollama_health,
-    SENTIMENT_POLL_INTERVAL, sleep_until_market
+    YFINANCE_CACHE_DIR, SENTIMENT_POLL_INTERVAL, sleep_until_market
 )
 from llm_router import llm_router
 import yfinance as yf
@@ -35,7 +34,7 @@ class SentimentAgent:
         """Get current ticker list (dynamic from eToro portfolio)."""
         return get_portfolio_tickers()
 
-    def _parse_llm_json(self, raw_text):
+    def _extract_llm_json(self, raw_text):
         if not raw_text:
             return None
 
@@ -86,7 +85,13 @@ class SentimentAgent:
             except Exception:
                 return None
 
-        if not isinstance(result, dict):
+        if isinstance(result, dict):
+            return result
+        return None
+
+    def _parse_sentiment_payload(self, raw_text):
+        result = self._extract_llm_json(raw_text)
+        if not result:
             return None
 
         sentiment = result.get("sentiment", "Neutral")
@@ -117,7 +122,7 @@ class SentimentAgent:
         if not raw_text:
             return "Neutral", f"API Error: {source}"
             
-        parsed = self._parse_llm_json(raw_text)
+        parsed = self._parse_sentiment_payload(raw_text)
         if parsed:
             return parsed["sentiment"], parsed["reason"]
             
@@ -129,7 +134,7 @@ class SentimentAgent:
 
         for symbol in tickers:
             try:
-                yf.set_tz_cache_location("custom_cache_dir")
+                yf.set_tz_cache_location(YFINANCE_CACHE_DIR)
                 ticker = yf.Ticker(symbol)
                 news = ticker.news
                 if not news:
@@ -194,7 +199,7 @@ class SentimentAgent:
         raw_text, source = llm_router.route_request(prompt, expect_json=True, agent_name="GlobalNews")
         if not raw_text: return
         
-        parsed = self._parse_llm_json(raw_text)
+        parsed = self._extract_llm_json(raw_text)
         if parsed and parsed.get("breaking"):
             try:
                 from telegram_notifier import send_telegram_message

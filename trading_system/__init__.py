@@ -1,0 +1,3 @@
+"""
+ClawdBot trading system package.
+"""

@@ -18,6 +18,7 @@ SYSTEM_DIR = os.path.dirname(os.path.abspath(__file__))
 TOOLS_PATH = os.path.join(ROOT_DIR, 'TOOLS.md')
 LOCK_FILE = os.path.join(SYSTEM_DIR, 'TRADE_FREEZE.lock')
 LOG_DIR = os.path.join(SYSTEM_DIR, 'logs')
+YFINANCE_CACHE_DIR = os.path.join(SYSTEM_DIR, 'custom_cache_dir')
 
 # ─── Timezone ─────────────────────────────────────────────────────────────────
 ET = pytz.timezone('US/Eastern')
@@ -56,18 +57,29 @@ ETORO_REQUEST_TIMEOUT = 15
 ETORO_MAX_RETRIES = 3
 
 # ─── Credential Parsing ─────────────────────────────────────────────────────
-_credentials_cache = {}
+_credentials_cache = None
+_credentials_cache_mtime = None
+
+
+def system_path(*parts):
+    """Build an absolute path rooted at trading_system/."""
+    return os.path.join(SYSTEM_DIR, *parts)
 
 def _parse_tools_md():
     """Parse TOOLS.md once and cache all credentials."""
-    global _credentials_cache
-    if _credentials_cache:
+    global _credentials_cache, _credentials_cache_mtime
+
+    try:
+        mtime = os.path.getmtime(TOOLS_PATH)
+    except OSError:
+        _credentials_cache = {}
+        _credentials_cache_mtime = None
+        return {}
+
+    if _credentials_cache is not None and _credentials_cache_mtime == mtime:
         return _credentials_cache
 
     creds = {}
-    if not os.path.exists(TOOLS_PATH):
-        return creds
-
     try:
         with open(TOOLS_PATH, 'r', encoding='utf-8') as f:
             content = f.read()
@@ -91,8 +103,10 @@ def _parse_tools_md():
                 creds[key] = match.group(1).strip()
 
         _credentials_cache = creds
+        _credentials_cache_mtime = mtime
     except Exception:
-        pass
+        _credentials_cache = {}
+        _credentials_cache_mtime = mtime
 
     return creds
 

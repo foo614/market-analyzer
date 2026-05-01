@@ -8,16 +8,16 @@ import sys
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from config import SYSTEM_DIR
+from config import YFINANCE_CACHE_DIR, system_path
 from llm_router import llm_router
 from agents.message_bus import bus
 from agents.sentiment_agent import SentimentAgent
 
-yf.set_tz_cache_location(os.path.join(SYSTEM_DIR, "custom_cache_dir"))
+yf.set_tz_cache_location(YFINANCE_CACHE_DIR)
 
 INDEX_TICKERS = {'SPY': 'S&P 500', 'QQQ': 'NASDAQ'}
 CRASH_THRESHOLD = -0.015  # -1.5% drop from the intraday High
-STATE_FILE = os.path.join(SYSTEM_DIR, "flash_crash_state.json")
+STATE_FILE = system_path("flash_crash_state.json")
 
 def check_flash_crass():
     state = {}
@@ -73,7 +73,7 @@ def check_flash_crass():
                 
                 # Parse using the sentiment agent's robust parser
                 agent = SentimentAgent()
-                parsed = agent._parse_llm_json(raw_text)
+                parsed = agent._extract_llm_json(raw_text)
                 
                 explanation = "Could not definitively identify the reason from current headlines."
                 if parsed and parsed.get("reason"):

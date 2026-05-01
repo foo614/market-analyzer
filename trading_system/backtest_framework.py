@@ -10,10 +10,10 @@ import requests
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from indicators import calculate_rsi, calculate_obv, calculate_macd, calculate_atr
-from config import get_credential
+from config import get_credential, YFINANCE_CACHE_DIR
 
 # Disable yfinance cache entirely to bypass peewee/sqlite issues in sandbox
-yf.set_tz_cache_location("custom_cache_dir")
+yf.set_tz_cache_location(YFINANCE_CACHE_DIR)
 
 def get_alpha_vantage_key():
     return get_credential('alpha_vantage_key', 'ALPHAVANTAGE_API_KEY')

@@ -12,21 +12,20 @@ import signal
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from logger import get_logger
-from config import WATCHDOG_INTERVAL, check_ollama_health
+from config import ROOT_DIR, WATCHDOG_INTERVAL, check_ollama_health
 
 log = get_logger("Orchestrator")
 
 SYSTEM_DIR = os.path.dirname(os.path.abspath(__file__))
-AGENTS_DIR = os.path.join(SYSTEM_DIR, "agents")
 
 AGENTS = [
-    {"name": "Notification Agent", "file": "notification_agent.py"},
-    {"name": "Execution Agent",    "file": "execution_agent.py"},
-    {"name": "Quant Agent",        "file": "quant_agent.py"},
-    {"name": "Data Agent",         "file": "data_agent.py"},
-    {"name": "Sentiment Agent",    "file": "sentiment_agent.py"},
-    {"name": "Tracker Agent",      "file": "etoro_tracker.py"},
-    {"name": "Market Analyzer",    "file": "../market_analyzer.py", "args": ["--daemon"]},
+    {"name": "Notification Agent", "module": "trading_system.agents.notification_agent"},
+    {"name": "Execution Agent",    "module": "trading_system.agents.execution_agent"},
+    {"name": "Quant Agent",        "module": "trading_system.agents.quant_agent"},
+    {"name": "Data Agent",         "module": "trading_system.agents.data_agent"},
+    {"name": "Sentiment Agent",    "module": "trading_system.agents.sentiment_agent"},
+    {"name": "Tracker Agent",      "module": "trading_system.agents.etoro_tracker"},
+    {"name": "Market Analyzer",    "module": "trading_system.market_analyzer", "args": ["--daemon"]},
 ]
 
 MAX_RESTARTS = 3
@@ -34,9 +33,10 @@ RESTART_BACKOFF_BASE = 5  # seconds
 
 
 class AgentProcess:
-    def __init__(self, name, file_path, args=None, cwd=None):
+    def __init__(self, name, args=None, cwd=None, file_path=None, module_name=None):
         self.name = name
         self.file_path = file_path
+        self.module_name = module_name
         self.args = args or []
         self.cwd = cwd
         self.process = None
@@ -45,7 +45,10 @@ class AgentProcess:
 
     def start(self):
         log.info(f"Starting {self.name}...")
-        cmd = [sys.executable, self.file_path] + self.args
+        if self.module_name:
+            cmd = [sys.executable, "-m", self.module_name] + self.args
+        else:
+            cmd = [sys.executable, self.file_path] + self.args
         self.process = subprocess.Popen(
             cmd,
             stdout=sys.stdout,
@@ -130,8 +133,7 @@ def main():
 
         # Start ZMQ broker first
         log.info("Starting ZeroMQ Message Broker...")
-        bus_path = os.path.join(SYSTEM_DIR, 'bus_server.py')
-        bus_agent = AgentProcess("ZMQ Broker", os.path.abspath(bus_path), cwd=SYSTEM_DIR)
+        bus_agent = AgentProcess("ZMQ Broker", module_name="trading_system.bus_server", cwd=ROOT_DIR)
         bus_agent.start()
         agents.append(bus_agent)
         time.sleep(2)  # Give socket time to bind
@@ -144,9 +146,12 @@ def main():
 
         # Start all agents with staggered delays
         for agent_def in AGENTS:
-            agent_path = os.path.abspath(os.path.join(AGENTS_DIR, agent_def["file"]))
-            
-            p = AgentProcess(agent_def["name"], agent_path, args=agent_def.get("args"), cwd=SYSTEM_DIR)
+            p = AgentProcess(
+                agent_def["name"],
+                module_name=agent_def["module"],
+                args=agent_def.get("args"),
+                cwd=ROOT_DIR
+            )
             p.start()
             agents.append(p)
             time.sleep(1)

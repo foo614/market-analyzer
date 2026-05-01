@@ -12,14 +12,14 @@ import sys
 import re
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from config import OLLAMA_API_URL, OLLAMA_MODEL, check_ollama_health, SYSTEM_DIR
+from config import OLLAMA_API_URL, OLLAMA_MODEL, check_ollama_health, SYSTEM_DIR, YFINANCE_CACHE_DIR, system_path
 from indicators import calculate_rsi
 from logger import get_logger
 
 log = get_logger("MarketAnalyzer")
 
 # Disable yfinance cache
-yf.set_tz_cache_location(os.path.join(SYSTEM_DIR, "custom_cache_dir"))
+yf.set_tz_cache_location(YFINANCE_CACHE_DIR)
 
 
 def get_support_resistance(high, low, close):
@@ -116,7 +116,7 @@ def analyze_market():
         report_content = f"{llm_brief}\n\n---\n\n{report_content}"
 
     # Save to file
-    report_path = os.path.join(SYSTEM_DIR, "market_report.md")
+    report_path = system_path("market_report.md")
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(report_content)
 

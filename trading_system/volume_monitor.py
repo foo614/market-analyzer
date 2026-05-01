@@ -9,10 +9,10 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from config import get_portfolio_tickers, SYSTEM_DIR
+from config import get_portfolio_tickers, YFINANCE_CACHE_DIR, system_path
 
-yf.set_tz_cache_location(os.path.join(SYSTEM_DIR, "custom_cache_dir"))
-STATE_FILE = os.path.join(SYSTEM_DIR, "volume_alert_state.json")
+yf.set_tz_cache_location(YFINANCE_CACHE_DIR)
+STATE_FILE = system_path("volume_alert_state.json")
 
 def get_historical_thresholds(symbol):
     """Calculate 20-day average volume and 60-day 99th percentile volume."""
