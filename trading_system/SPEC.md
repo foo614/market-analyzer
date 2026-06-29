@@ -38,10 +38,11 @@ At the core is a ZMQ XSUB/XPUB proxy (`bus_server.py`) that routes messages betw
 - **Output:** Emits trade signals to `trade_signals` queue.
 
 ### 3.3 Execution Agent (`agents/execution_agent.py`)
-**Role:** The Hands (Order Gateway).
+**Role:** Paper Gate and Recommendation Router.
 - Listens to `trade_signals` queue.
-- Executes trades on eToro Demo via REST API.
-- Sends REAL portfolio recommendations (manual execution) via `notifications`.
+- Routes demo handling through `PaperTradeAgent`.
+- Defaults demo handling to `dry-run`; demo execution requires an explicit mode change.
+- Sends REAL portfolio recommendations (manual execution only) via `notifications`.
 - Includes LLM advisory opinion in notification messages.
 
 ### 3.4 Notification Agent (`agents/notification_agent.py`)
@@ -77,7 +78,7 @@ At the core is a ZMQ XSUB/XPUB proxy (`bus_server.py`) that routes messages betw
 - Per-symbol allocation warnings at 40%.
 
 ### Auto Trader (`auto_trader.py`)
-- eToro Demo trade execution gateway.
+- eToro Demo helper used only when demo execution mode is explicitly enabled.
 - Uses centralized config for API credentials.
 
 ---

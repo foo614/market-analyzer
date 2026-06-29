@@ -12,7 +12,7 @@ from datetime import datetime
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import (
     get_gemini_api_keys, GEMINI_MODEL, GEMINI_RPM_LIMIT, GEMINI_RPD_LIMIT,
-    OLLAMA_API_URL, OLLAMA_MODEL, check_ollama_health
+    OPENROUTER_MODEL, OLLAMA_API_URL, OLLAMA_MODEL, check_ollama_health, get_credential
 )
 from logger import get_logger
 
@@ -35,10 +35,38 @@ TRACKER_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "llm_tra
 
 class LLMRouter:
     def __init__(self):
+        self.openai_key = get_credential('openai_key')
+        self.openrouter_key = get_credential('openrouter_key', 'OPENROUTER_API_KEY')
+        self.nvidia_key = get_credential('nvidia_key')
+
         if genai and get_gemini_api_keys():
             log.info(f"Gemini enabled ({GEMINI_MODEL})")
         elif genai:
-            log.warning("Gemini keys not configured. Falling back to Ollama.")
+            log.warning("Gemini keys not configured.")
+
+        if self.openai_key and OpenAI:
+            log.info("OpenAI High-Tier Client enabled (gpt-4o)")
+            self.openai_real_client = OpenAI(api_key=self.openai_key)
+        else:
+            self.openai_real_client = None
+
+        if self.openrouter_key and OpenAI:
+            log.info(f"OpenRouter Client enabled ({OPENROUTER_MODEL})")
+            self.openrouter_client = OpenAI(
+                base_url="https://openrouter.ai/api/v1",
+                api_key=self.openrouter_key,
+            )
+        else:
+            self.openrouter_client = None
+
+        if self.nvidia_key and OpenAI:
+            log.info("NVIDIA Mid-Tier Client enabled (meta/llama-3.1-405b-instruct)")
+            self.nvidia_client = OpenAI(
+                base_url="https://integrate.api.nvidia.com/v1",
+                api_key=self.nvidia_key
+            )
+        else:
+            self.nvidia_client = None
 
         self.ollama_client = None
         ollama_ok, msg = check_ollama_health()
@@ -180,6 +208,53 @@ class LLMRouter:
                     self._save_state()
                     continue
                 break
+
+        # --- OPENROUTER FALLBACK ---
+        if not raw_text and self.openrouter_client:
+            log.info(f"{agent_name} -> OpenRouter ({OPENROUTER_MODEL})")
+            try:
+                response = self.openrouter_client.chat.completions.create(
+                    model=OPENROUTER_MODEL,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.2,
+                    max_tokens=300,
+                    response_format={"type": "json_object"} if expect_json else None
+                )
+                raw_text = response.choices[0].message.content
+                source = "OpenRouter"
+            except Exception as e:
+                log.warning(f"OpenRouter fallback failed: {e}")
+
+        # --- OPENAI FALLBACK ---
+        if not raw_text and self.openai_real_client:
+            log.info(f"{agent_name} -> OpenAI (gpt-4o)")
+            try:
+                response = self.openai_real_client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.2,
+                    max_tokens=300,
+                    response_format={"type": "json_object"} if expect_json else None
+                )
+                raw_text = response.choices[0].message.content
+                source = "OpenAI"
+            except Exception as e:
+                log.warning(f"OpenAI fallback failed: {e}")
+
+        # --- NVIDIA FALLBACK ---
+        if not raw_text and self.nvidia_client:
+            log.info(f"{agent_name} -> NVIDIA (Llama 3.1)")
+            try:
+                response = self.nvidia_client.chat.completions.create(
+                    model="meta/llama-3.1-405b-instruct",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.2,
+                    max_tokens=300
+                )
+                raw_text = response.choices[0].message.content
+                source = "NVIDIA"
+            except Exception as e:
+                log.warning(f"NVIDIA fallback failed: {e}")
 
         # --- OLLAMA FALLBACK ---
         if not raw_text:

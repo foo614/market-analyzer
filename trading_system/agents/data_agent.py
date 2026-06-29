@@ -8,11 +8,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from agents.message_bus import bus
 from logger import get_logger
 from config import (
-    get_portfolio_tickers, is_market_open, is_trading_day,
-    DATA_POLL_INTERVAL, sleep_until_market
+    get_real_position_tickers, get_trend_watchlist, is_market_open, is_trading_day,
+    get_data_poll_interval, sleep_until_market
 )
-from indicators import calculate_rsi_scalar, calculate_atr_scalar, calculate_obv_from_lists
-import yfinance as yf
+from broker_providers import fetch_history
+from trend_strategy import analyze_trend_frame
 import pandas as pd
 
 import warnings
@@ -33,60 +33,59 @@ class DataAgent:
         log.info("DataAgent Initialized")
 
     def _get_tickers(self):
-        """Get current ticker list (dynamic from eToro portfolio)."""
-        return get_portfolio_tickers()
+        """Get current trend scanner watchlist."""
+        return get_trend_watchlist()
+
+    def _get_position_symbols(self):
+        """Get real held symbols without fallback assumptions."""
+        return set(get_real_position_tickers())
+
+    def _data_context(self, hist, period, interval, source):
+        source = str(source or "unknown")
+        latest_bar_ts = str(hist.index[-1]) if hist is not None and len(hist.index) else ""
+
+        confidence = "high" if source == "moomoo" else "medium"
+        nonzero_volume_count = 0
+        if hist is not None and "Volume" in hist.columns:
+            volumes = pd.to_numeric(hist["Volume"], errors="coerce").fillna(0)
+            nonzero_volume_count = int((volumes > 0).sum())
+            required_volume_bars = min(10, max(2, len(volumes) // 3))
+            if nonzero_volume_count < required_volume_bars:
+                confidence = "low"
+        if hist is None or len(hist) < 55:
+            confidence = "low"
+
+        return {
+            "dataSource": source,
+            "dataPeriod": str(period),
+            "dataInterval": str(interval),
+            "dataConfidence": confidence,
+            "latestBarTs": latest_bar_ts,
+            "nonzeroVolumeBars": nonzero_volume_count,
+        }
 
     def run_technical_scan(self):
         tickers = self._get_tickers()
+        position_symbols = self._get_position_symbols()
         log.info(f"Running Technical Scan on {tickers}...")
         appended_count = 0
 
         for symbol in tickers:
             try:
-                hist = yf.download(symbol, period="3mo", interval="1d", progress=False)
+                hist, period, interval, source = fetch_history(symbol, provider="auto", interval="5m")
                 if hist.empty:
                     continue
 
                 if isinstance(hist.columns, pd.MultiIndex):
                     hist.columns = hist.columns.droplevel(1)
 
-                quotes = []
-                for index, row in hist.iterrows():
-                    quotes.append({
-                        'close': float(row['Close']),
-                        'high': float(row['High']),
-                        'low': float(row['Low']),
-                        'volume': float(row['Volume'])
-                    })
-
-                prices = [q['close'] for q in quotes]
-                volumes = [q['volume'] for q in quotes]
-                currentPrice = prices[-1]
-                sma50 = sum(prices[-50:]) / 50 if len(prices) >= 50 else None
-
-                rsi = calculate_rsi_scalar(prices, 14)
-                atr = calculate_atr_scalar(quotes, 14)
-
-                obv_array = calculate_obv_from_lists(prices, volumes)
-
-                recentObv = sum(obv_array[-5:]) / 5 if len(obv_array) >= 10 else 0
-                prevObv = sum(obv_array[-10:-5]) / 5 if len(obv_array) >= 10 else 0
-                obvStatus = "Accumulating" if recentObv > prevObv else "Distributing"
-
-                isBullish = currentPrice > sma50 if sma50 else None
-
-                data_payload = {
-                    'source': 'obv_monitor',
-                    'symbol': symbol,
-                    'price': currentPrice,
-                    'sma50': sma50,
-                    'rsi': rsi,
-                    'atr': atr,
-                    'recentObv': recentObv,
-                    'prevObv': prevObv,
-                    'obvStatus': obvStatus,
-                    'isBullish': isBullish
-                }
+                data_payload = analyze_trend_frame(
+                    hist,
+                    symbol=symbol,
+                    timeframe=interval,
+                    in_position=str(symbol).upper() in position_symbols,
+                )
+                data_payload.update(self._data_context(hist, period, interval, source))
 
                 bus.publish('market_data', data_payload)
                 appended_count += 1
@@ -107,8 +106,8 @@ class DataAgent:
     def run_flash_crash_scan(self):
         log.info("Scanning for Market Flash Crashes...")
         try:
-            from flash_crash_monitor import check_flash_crass
-            check_flash_crass()
+            from flash_crash_monitor import check_flash_crash
+            check_flash_crash()
         except Exception as e:
             log.error(f"Flash crash scan error: {e}")
 
@@ -139,6 +138,7 @@ class DataAgent:
                 self.last_backtest_scan = today_str
             except Exception as e:
                 log.error(f"Daily backtest error: {e}")
+                self.last_backtest_scan = today_str
 
     def start(self):
         self.running = True
@@ -160,7 +160,10 @@ class DataAgent:
             self.run_flash_crash_scan()
             self.run_sector_scan()
             self.run_daily_backtest()
-            time.sleep(DATA_POLL_INTERVAL)
+            interval = get_data_poll_interval()
+            if interval <= 60:
+                log.info("TURBO MODE ACTIVE (1 min polling)")
+            time.sleep(interval)
 
 
 if __name__ == "__main__":
