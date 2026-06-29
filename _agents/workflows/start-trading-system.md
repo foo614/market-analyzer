@@ -4,16 +4,27 @@ description: Boot sequence to initialize the Multi-Agent Trading System natively
 
 # Multi-Agent Boot Sequence
 
-This workflow initializes the complete Python trading cluster (ZMQ Broker, Execution Agent, Quant Agent, Tracker Agent, etc.).
+This workflow initializes the Python trading cluster after the local replay
+safety checks pass. Real portfolio signals remain manual recommendations, and
+demo mode defaults to `dry-run`.
 
-1. **Stop Zombie Processes:**
-   First, forcefully terminate any residual background agents to ensure a clean ZeroMQ bus alignment.
+1. **Run Replay Safety Checks:**
    // turbo
-   `Stop-Process -Name python -Force`
+   `python -m trading_system.replay_harness --scenario all --include-pipeline`
 
-2. **Initialize Agents:**
-   Start the primary Python orchestrator natively in the background. Leave this process running continuously.
+2. **Run Unit Checks:**
    // turbo
-   `python trading_system/start_all_agents.py`
+   `python -m unittest discover -s trading_system\tests -v`
 
-*System initialized successfully. All agents are now securely streaming data and executing payloads over ZeroMQ.*
+3. **Inspect Existing Python Processes Before Restarting:**
+   // turbo
+   `Get-Process python`
+
+4. **Initialize Agents:**
+   Start the primary Python orchestrator natively. Leave this process running continuously.
+   // turbo
+   `python -m trading_system.start_all_agents`
+
+Expected runtime flow: `DataAgent -> QuantAgent -> ExecutionAgent -> NotificationAgent`.
+The execution agent routes signals through the paper gate and emits real
+portfolio recommendations for manual action.

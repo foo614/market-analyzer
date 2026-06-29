@@ -16,6 +16,7 @@ import pytz
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SYSTEM_DIR = os.path.dirname(os.path.abspath(__file__))
 TOOLS_PATH = os.path.join(ROOT_DIR, 'TOOLS.md')
+TOOLS_LOCAL_PATH = os.path.join(ROOT_DIR, 'TOOLS.local.md')
 LOCK_FILE = os.path.join(SYSTEM_DIR, 'TRADE_FREEZE.lock')
 LOG_DIR = os.path.join(SYSTEM_DIR, 'logs')
 YFINANCE_CACHE_DIR = os.path.join(SYSTEM_DIR, 'custom_cache_dir')
@@ -24,10 +25,11 @@ YFINANCE_CACHE_DIR = os.path.join(SYSTEM_DIR, 'custom_cache_dir')
 ET = pytz.timezone('US/Eastern')
 
 # ─── Polling Intervals (seconds) ─────────────────────────────────────────────
-DATA_POLL_INTERVAL = 900       # 15 minutes
-SENTIMENT_POLL_INTERVAL = 900  # 15 minutes
-TRACKER_POLL_INTERVAL = 3600   # 60 minutes
-WATCHDOG_INTERVAL = 30         # 30 seconds
+DATA_POLL_INTERVAL_NORMAL = 900    # 15 minutes
+DATA_POLL_INTERVAL_TURBO = 60      # 1 minute
+SENTIMENT_POLL_INTERVAL = 900      # 15 minutes
+TRACKER_POLL_INTERVAL = 3600       # 60 minutes
+WATCHDOG_INTERVAL = 30             # 30 seconds
 
 # ─── Risk Thresholds ─────────────────────────────────────────────────────────
 MAX_DAILY_LOSS_PCT = 0.01       # 1%
@@ -39,16 +41,36 @@ DEFAULT_TRADE_AMOUNT = 500
 SIGNAL_COOLDOWN_MINUTES = 60  # Suppress duplicate signals for same symbol
 
 # ─── Fallback Tickers (used if eToro API is unreachable) ─────────────────────
-FALLBACK_TICKERS = ['TSLA', 'SOXL', 'TQQQ']
+FALLBACK_TICKERS = ['TSLA', 'SOXL', 'TQQQ', 'SPCX']
+
+
+def _dedupe_symbols(symbols):
+    seen = set()
+    result = []
+    for symbol in symbols:
+        clean = str(symbol or "").strip().upper()
+        if clean and clean not in seen:
+            seen.add(clean)
+            result.append(clean)
+    return result
+
+
+def get_trend_watchlist():
+    """Return the configured trend-scanner watchlist."""
+    raw = os.environ.get("CLAWDBOT_TREND_WATCHLIST")
+    if raw:
+        return _dedupe_symbols(re.split(r"[\s,]+", raw))
+    return _dedupe_symbols(FALLBACK_TICKERS)
 
 # ─── LLM Configuration ────────────────────────────────────────────────────────
 GEMINI_MODEL = "gemini-2.5-flash"
 GEMINI_RPM_LIMIT = 5
 GEMINI_RPD_LIMIT = 20
+OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "openai/gpt-4o-mini")
 
 # ─── Ollama (Fallback) ───────────────────────────────────────────────────────
 OLLAMA_BASE_URL = "http://localhost:11434"
-OLLAMA_MODEL = "gemma4:e4b"
+OLLAMA_MODEL = "mistral:latest"
 OLLAMA_API_URL = f"{OLLAMA_BASE_URL}/v1"
 
 # ─── eToro ───────────────────────────────────────────────────────────────────
@@ -65,48 +87,61 @@ def system_path(*parts):
     """Build an absolute path rooted at trading_system/."""
     return os.path.join(SYSTEM_DIR, *parts)
 
+def _tools_mtimes():
+    mtimes = []
+    for path in (TOOLS_PATH, TOOLS_LOCAL_PATH):
+        try:
+            mtimes.append(os.path.getmtime(path))
+        except OSError:
+            mtimes.append(None)
+    return tuple(mtimes)
+
 def _parse_tools_md():
-    """Parse TOOLS.md once and cache all credentials."""
+    """Parse local credential files once and cache all credentials."""
     global _credentials_cache, _credentials_cache_mtime
 
-    try:
-        mtime = os.path.getmtime(TOOLS_PATH)
-    except OSError:
+    mtimes = _tools_mtimes()
+    if all(mtime is None for mtime in mtimes):
         _credentials_cache = {}
-        _credentials_cache_mtime = None
+        _credentials_cache_mtime = mtimes
         return {}
 
-    if _credentials_cache is not None and _credentials_cache_mtime == mtime:
+    if _credentials_cache is not None and _credentials_cache_mtime == mtimes:
         return _credentials_cache
 
     creds = {}
+    patterns = {
+        'telegram_bot_token': r'\*\*Bot Token:\*\*\s*`([^`]+)`',
+        'telegram_chat_id': r'\*\*Chat ID:\*\*\s*`([^`]+)`',
+        'alpha_vantage_key': r'\*\*Alpha Vantage API Key:\*\*\s*`([^`]+)`',
+        'openai_key': r'\*\*OpenAI API Key:\*\*\s*`([^`]+)`',
+        'openrouter_key': r'\*\*OpenRouter API Key:\*\*\s*`([^`]+)`',
+        'nvidia_key': r'\*\*NVIDIA API Key:\*\*\s*`([^`]+)`',
+        'gemini_key': r'\*\*Gemini API Key:\*\*\s*`([^`]+)`',
+        'gemini_key_fallback': r'\*\*Gemini API Key \(Fallback\):\*\*\s*`([^`]+)`',
+        'etoro_pub_key': r'\*\*Public Key:\*\*\s*`([^`]+)`',
+        'etoro_demo_key': r'\*\*Demo User Key:\*\*\s*`([^`]+)`',
+        'etoro_real_key': r'\*\*Real User Key:\*\*\s*`([^`]+)`',
+    }
+
     try:
-        with open(TOOLS_PATH, 'r', encoding='utf-8') as f:
-            content = f.read()
+        for path in (TOOLS_PATH, TOOLS_LOCAL_PATH):
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+            except OSError:
+                continue
 
-        patterns = {
-            'telegram_bot_token': r'\*\*Bot Token:\*\*\s*`([^`]+)`',
-            'telegram_chat_id': r'\*\*Chat ID:\*\*\s*`([^`]+)`',
-            'alpha_vantage_key': r'\*\*Alpha Vantage API Key:\*\*\s*`([^`]+)`',
-            'openai_key': r'\*\*OpenAI API Key:\*\*\s*`([^`]+)`',
-            'nvidia_key': r'\*\*NVIDIA API Key:\*\*\s*`([^`]+)`',
-            'gemini_key': r'\*\*Gemini API Key:\*\*\s*`([^`]+)`',
-            'gemini_key_fallback': r'\*\*Gemini API Key \(Fallback\):\*\*\s*`([^`]+)`',
-            'etoro_pub_key': r'\*\*Public Key:\*\*\s*`([^`]+)`',
-            'etoro_demo_key': r'\*\*Demo User Key:\*\*\s*`([^`]+)`',
-            'etoro_real_key': r'\*\*Real User Key:\*\*\s*`([^`]+)`',
-        }
-
-        for key, pattern in patterns.items():
-            match = re.search(pattern, content)
-            if match:
-                creds[key] = match.group(1).strip()
+            for key, pattern in patterns.items():
+                match = re.search(pattern, content)
+                if match:
+                    creds[key] = match.group(1).strip()
 
         _credentials_cache = creds
-        _credentials_cache_mtime = mtime
+        _credentials_cache_mtime = mtimes
     except Exception:
         _credentials_cache = {}
-        _credentials_cache_mtime = mtime
+        _credentials_cache_mtime = mtimes
 
     return creds
 
@@ -130,6 +165,46 @@ def get_gemini_api_keys():
     if fallback and fallback.strip() and (not keys or fallback.strip() != keys[0]):
         keys.append(fallback.strip())
     return keys
+
+
+def get_execution_broker():
+    return (os.environ.get("CLAWDBOT_EXECUTION_BROKER") or "etoro").strip().lower()
+
+
+def get_demo_execution_mode():
+    raw = (
+        os.environ.get("CLAWDBOT_DEMO_EXECUTION_MODE")
+        or os.environ.get("CLAWDBOT_PAPER_TRADE_MODE")
+        or "dry-run"
+    )
+    value = str(raw).strip().lower().replace("_", "-")
+    if value in {"demo", "execute", "demo-execute"}:
+        return "demo-execute"
+    return "dry-run"
+
+
+def get_futu_opend_host():
+    return (os.environ.get("FUTU_OPEND_HOST") or "127.0.0.1").strip()
+
+
+def get_futu_opend_port():
+    try:
+        return int(os.environ.get("FUTU_OPEND_PORT") or "11111")
+    except Exception:
+        return 11111
+
+
+def get_futu_trd_env():
+    return (os.environ.get("FUTU_TRD_ENV") or "SIMULATE").strip().upper()
+
+
+def get_futu_default_market():
+    return (os.environ.get("FUTU_DEFAULT_MARKET") or "US").strip().upper()
+
+
+def get_futu_security_firm():
+    val = os.environ.get("FUTU_SECURITY_FIRM")
+    return val.strip().upper() if val else None
 
 
 # ─── eToro Headers ───────────────────────────────────────────────────────────
@@ -250,6 +325,47 @@ def get_portfolio_tickers(force_refresh=False):
     if _ticker_cache['symbols']:
         return _ticker_cache['symbols']
     return FALLBACK_TICKERS
+
+
+def get_real_position_tickers(force_refresh=False):
+    """
+    Discover tickers from the eToro Real portfolio without fallback symbols.
+    Used for position-aware sell alerts; returns [] if the API is unavailable.
+    """
+    now = time.time()
+    cache_key = 'real_position_symbols'
+    cache_time_key = 'real_position_last_refresh'
+    if not force_refresh and _ticker_cache.get(cache_key) and (now - _ticker_cache.get(cache_time_key, 0) < 300):
+        return _ticker_cache[cache_key]
+
+    try:
+        headers = get_etoro_headers(is_real=True)
+        data = etoro_request('/trading/info/portfolio', headers=headers)
+        if not data:
+            return []
+
+        portfolio = data.get('clientPortfolio', data)
+        positions = portfolio.get('positions', portfolio.get('Positions', []))
+
+        symbols = set()
+        for position in positions:
+            inst_id = position.get('instrumentID', position.get('InstrumentID'))
+            if not inst_id:
+                continue
+            symbol = _ticker_cache['instrument_map'].get(inst_id)
+            if not symbol:
+                symbol = _resolve_instrument_id(inst_id, headers)
+                if symbol:
+                    _ticker_cache['instrument_map'][inst_id] = symbol
+            if symbol:
+                symbols.add(symbol)
+
+        result = sorted(symbols)
+        _ticker_cache[cache_key] = result
+        _ticker_cache[cache_time_key] = now
+        return result
+    except Exception:
+        return []
 
 
 def get_portfolio_equity(is_real=True):
@@ -445,6 +561,31 @@ def sleep_until_market(logger=None):
         print(msg)
 
     time.sleep(secs)
+
+
+def get_data_poll_interval():
+    """
+    Returns polling interval in seconds.
+    Switches to TURBO (1 min) during high-volatility windows:
+    - First 60 minutes of market open.
+    - Last 30 minutes of market close.
+    """
+    if not is_market_open():
+        return DATA_POLL_INTERVAL_NORMAL
+
+    now = datetime.now(ET)
+    market_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
+    market_close = now.replace(hour=16, minute=0, second=0, microsecond=0)
+
+    # Turbo during first 60 mins
+    if market_open <= now <= market_open + timedelta(minutes=60):
+        return DATA_POLL_INTERVAL_TURBO
+
+    # Turbo during last 30 mins
+    if market_close - timedelta(minutes=30) <= now <= market_close:
+        return DATA_POLL_INTERVAL_TURBO
+
+    return DATA_POLL_INTERVAL_NORMAL
 
 
 # ─── Ollama Health Check ─────────────────────────────────────────────────────

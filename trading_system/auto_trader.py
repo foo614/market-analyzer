@@ -39,22 +39,74 @@ def get_demo_portfolio():
 
 def demo_has_position(symbol):
     """Check if the Demo Portfolio currently holds a position in the given symbol."""
+    return get_demo_position(symbol) is not None
+
+
+def get_demo_position(symbol):
+    """Return the first matching demo position for a symbol, if present."""
     instrument_id = get_instrument_id(symbol)
     if not instrument_id:
-        return False
+        return None
 
     portfolio = get_demo_portfolio()
     if not portfolio:
-        return False
+        return None
 
     # Handle both key casing variants
     positions = portfolio.get('Positions', portfolio.get('positions', []))
     for pos in positions:
         iid = pos.get('InstrumentID', pos.get('instrumentID'))
         if iid == instrument_id:
-            return True
+            return pos
 
-    return False
+    return None
+
+
+def _position_id(position):
+    return (
+        position.get('PositionID')
+        or position.get('positionID')
+        or position.get('positionId')
+        or position.get('id')
+    )
+
+
+def close_demo_position(symbol, units_to_deduct=None):
+    """Close an existing eToro Demo position using the close-position endpoint."""
+    log.info(f"Initiating CLOSE order for {symbol} on DEMO account...")
+
+    instrument_id = get_instrument_id(symbol)
+    if not instrument_id:
+        log.error(f"Could not find Instrument ID for {symbol}.")
+        return False
+
+    position = get_demo_position(symbol)
+    if not position:
+        log.info(f"No demo position found for {symbol}; close skipped.")
+        return False
+
+    position_id = _position_id(position)
+    if not position_id:
+        log.error(f"Could not find PositionID for {symbol} demo position.")
+        return False
+
+    headers = get_etoro_headers(is_real=False)
+    url = f"{ETORO_BASE_URL}/trading/execution/demo/market-close-orders/positions/{position_id}"
+    payload = {
+        "InstrumentID": instrument_id,
+        "UnitsToDeduct": units_to_deduct,
+    }
+
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=15)
+        if response.status_code in [200, 201]:
+            log.info(f"DEMO CLOSE SUCCESS: {symbol} position {position_id}")
+            return True
+        log.error(f"DEMO CLOSE FAILED: {response.status_code} - {response.text[:200]}")
+        return False
+    except Exception as e:
+        log.error(f"Error closing demo position: {e}")
+        return False
 
 
 def execute_demo_trade(symbol, action, amount=1000):

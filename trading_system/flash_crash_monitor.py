@@ -19,7 +19,7 @@ INDEX_TICKERS = {'SPY': 'S&P 500', 'QQQ': 'NASDAQ'}
 CRASH_THRESHOLD = -0.015  # -1.5% drop from the intraday High
 STATE_FILE = system_path("flash_crash_state.json")
 
-def check_flash_crass():
+def check_flash_crash():
     state = {}
     if os.path.exists(STATE_FILE):
         try:
@@ -103,4 +103,4 @@ def check_flash_crass():
         json.dump(state, f)
 
 if __name__ == "__main__":
-    check_flash_crass()
+    check_flash_crash()
